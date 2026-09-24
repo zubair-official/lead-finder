@@ -16,8 +16,9 @@ import { config } from "./config.js";
 
 export const RUNS_DIR = config.runsDir;
 
-/** state: running | done | stopped | blocked | error
- *  "blocked" is reserved for Google refusing us (CAPTCHA / unusual traffic). */
+/** state: running | done | stopped | blocked | error | interrupted
+ *  "blocked" is reserved for Google refusing us (CAPTCHA / unusual traffic);
+ *  "interrupted" means the server stopped while the run was still going. */
 export class Job {
   constructor({ city, category, onlyWithWebsite, lookupEmails }) {
     this.id = randomBytes(6).toString("hex");
@@ -91,6 +92,22 @@ export class Job {
     this.message = message;
     this.needsAttention = needsAttention;
     if (state) this.state = state;
+  }
+
+  /**
+   * Record that the server went away mid-run.
+   *
+   * Without this the sidecar keeps saying "running" forever, so an interrupted
+   * run is indistinguishable from one still in progress in the history list.
+   */
+  async markInterrupted() {
+    this.stopRequested = true;
+    this.phase = "finished";
+    this.setStatus(
+      `Interrupted: the server stopped during this run. ${this.results.length} businesses were saved.`,
+      { state: "interrupted" },
+    );
+    await this.writeMeta();
   }
 
   requestStop() {

@@ -720,8 +720,9 @@ async function poll() {
   emailPassRunning = data.phase === "emails";
   setRows(data.results || []);
 
-  const finished = ["done", "stopped", "blocked", "error"].includes(data.state);
-  const kind = data.state === "blocked" || data.state === "error" ? "blocked"
+  // "interrupted" means the server stopped mid-run; it is terminal, so stop polling.
+  const finished = ["done", "stopped", "blocked", "error", "interrupted"].includes(data.state);
+  const kind = ["blocked", "error", "interrupted"].includes(data.state) ? "blocked"
     : data.needs_attention ? "attention" : finished ? "done" : "working";
   setStatus(data.message || "", kind, kind === "done" ? "✓" : kind === "blocked" ? "!" : "");
 
