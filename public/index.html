@@ -773,8 +773,11 @@ function exportJson() {
 /* ---------------- run history ---------------- */
 async function loadRuns() {
   try {
-    const { runs } = await (await fetch("/api/runs")).json();
-    el("historyCount").textContent = runs.length ? `(${runs.length})` : "(none yet)";
+    const { runs, total } = await (await fetch("/api/runs")).json();
+    // total can exceed runs.length: the endpoint is paginated.
+    el("historyCount").textContent = !total
+      ? "(none yet)"
+      : runs.length < total ? `(showing ${runs.length} of ${total})` : `(${total})`;
     el("runs").innerHTML = runs.length
       ? runs.map((run) => {
           const when = run.createdAt ? new Date(run.createdAt).toLocaleString() : "date unknown";
