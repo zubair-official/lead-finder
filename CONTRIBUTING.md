@@ -25,7 +25,7 @@ Run the app with `npm start`. Build the static portfolio demo with `npm run buil
 1. Create a branch from `main`.
 2. Keep the change focused and explain the user-visible behavior.
 3. Add or update tests for changed parsing, scoring, configuration, or deduplication logic.
-4. Run `npm test` and, for UI/demo changes, `npm run build:demo`.
+4. Run `npm test` and, for UI/demo changes, `npm run build:demo`. `npm test` uses Node's own test-file discovery, so a new `test/*.test.js` file is picked up with no script change.
 5. Do not commit `runs/`, `.browser-profile/`, `.env`, `dist/`, or `node_modules/`.
 
 ## Non-negotiable scraper boundaries
