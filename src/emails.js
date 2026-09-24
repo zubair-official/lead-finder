@@ -102,11 +102,14 @@ export function baseDomain(url) {
 
 /** Fetches business websites politely: robots.txt respected, one page at a time. */
 export class SiteFetcher {
-  constructor({ timeout = config.emailTimeoutMs, resolve } = {}) {
+  constructor({ timeout = config.emailTimeoutMs, budget = config.siteBudgetMs, resolve, fetchImpl } = {}) {
     this.timeout = timeout;
+    // Ceiling on the whole site, not just one request.
+    this.budget = budget;
     this.robotsCache = new Map();
-    // Injectable for tests; undefined means node's own DNS lookup.
+    // Injectable for tests; undefined means node's own DNS lookup / global fetch.
     this.resolve = resolve;
+    this.fetchImpl = fetchImpl ?? ((...args) => fetch(...args));
   }
 
   /**
@@ -116,16 +119,17 @@ export class SiteFetcher {
    * `redirect: "follow"` only the first URL could be vetted, and a public
    * hostname that redirects to 127.0.0.1 is the usual way past that.
    */
-  async #get(url) {
+  async #get(url, timeoutMs = this.timeout) {
     let current = url;
 
     for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
       await assertPublicUrl(current, { resolve: this.resolve });
 
-      const response = await fetch(current, {
+      const response = await this.fetchImpl(current, {
         headers: { "User-Agent": USER_AGENT },
         redirect: "manual",
-        signal: AbortSignal.timeout(this.timeout),
+        // Never longer than what is left of the site's budget.
+        signal: AbortSignal.timeout(Math.max(1, timeoutMs)),
       });
 
       const location = response.status >= 300 && response.status < 400
@@ -139,12 +143,12 @@ export class SiteFetcher {
     throw new BlockedAddressError(`Too many redirects starting at ${url}`);
   }
 
-  async #robotsFor(url) {
+  async #robotsFor(url, timeoutMs) {
     const { origin } = new URL(url);
     if (!this.robotsCache.has(origin)) {
       let parser = null;
       try {
-        const response = await this.#get(`${origin}/robots.txt`);
+        const response = await this.#get(`${origin}/robots.txt`, timeoutMs);
         // No usable robots.txt: default to allowed, same as any crawler would.
         if (response.ok) {
           const { text } = await readCapped(response, config.maxPageBytes);
@@ -160,9 +164,9 @@ export class SiteFetcher {
     return this.robotsCache.get(origin);
   }
 
-  async mayFetch(url) {
+  async mayFetch(url, timeoutMs = this.timeout) {
     if (!config.respectRobots) return true;
-    const parser = await this.#robotsFor(url);
+    const parser = await this.#robotsFor(url, timeoutMs);
     if (!parser) return true;
     return parser.isAllowed(url, USER_AGENT) !== false;
   }
@@ -193,7 +197,16 @@ export class SiteFetcher {
     let email = null;
     let source = null;
 
+    // One business gets one budget, however many contact pages that covers.
+    const deadline = Date.now() + this.budget;
+    const remaining = () => deadline - Date.now();
+
     for (const contactPath of CONTACT_PATHS) {
+      if (remaining() <= 0) {
+        log.debug("site budget spent, moving on", { website, budgetMs: this.budget });
+        break;
+      }
+
       let url;
       try {
         url = new URL(contactPath, target).href;
@@ -201,7 +214,7 @@ export class SiteFetcher {
         continue;
       }
       try {
-        if (!(await this.mayFetch(url))) continue;
+        if (!(await this.mayFetch(url, Math.min(this.timeout, remaining())))) continue;
       } catch (error) {
         if (error instanceof BlockedAddressError) {
           log.warn("refused to fetch an internal address", { website, reason: error.message });
@@ -213,7 +226,7 @@ export class SiteFetcher {
       const startedAt = Date.now();
       let response;
       try {
-        response = await this.#get(url);
+        response = await this.#get(url, Math.min(this.timeout, remaining()));
       } catch (error) {
         if (error instanceof BlockedAddressError) {
           // Not a lead and not a failure of theirs: stop touching this host.
@@ -221,8 +234,14 @@ export class SiteFetcher {
           return { email: null, source: null, analysis: null, blocked: true };
         }
         // Timeout, DNS failure, bad certificate. A homepage that will not load
-        // is itself the strongest signal there is.
-        if (contactPath === "/") analysis = analyseSite({ url: target, reachable: false });
+        // is itself the strongest signal there is - and the five remaining
+        // paths are on the same host, so they would fail the same way. Trying
+        // them anyway is what made a dead domain cost a full minute.
+        if (contactPath === "/") {
+          log.debug("homepage unreachable, skipping the other contact paths", { website });
+          analysis = analyseSite({ url: target, reachable: false });
+          break;
+        }
         continue;
       }
 

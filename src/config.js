@@ -94,6 +94,10 @@ export const config = Object.freeze({
   // Ceiling on a fetched page body. We only need the first chunk of markup,
   // and an unbounded read lets one hostile response exhaust memory.
   maxPageBytes: readInt("MAX_PAGE_BYTES", 2_000_000, { min: 10_000, max: 50_000_000 }),
+  // Total time allowed for one business's site, across every contact page
+  // tried. Without it, six paths at EMAIL_TIMEOUT_MS each means a single
+  // unresponsive host can hold a run for over a minute.
+  siteBudgetMs: readInt("SITE_BUDGET_MS", 25_000, { min: 5_000, max: 300_000 }),
   respectRobots: readBool("RESPECT_ROBOTS", true),
 
   runsDir: path.resolve(PROJECT_ROOT, process.env.RUNS_DIR || "runs"),
