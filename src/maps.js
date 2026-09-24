@@ -367,6 +367,30 @@ async function readDetailPanel(panel, business) {
   }
 }
 
+/**
+ * The browser currently in use, if any.
+ *
+ * scrape() closes its own browser in a finally block, but that block never runs
+ * if the process is being torn down. Holding the handle here lets the shutdown
+ * path close Chromium instead of orphaning it.
+ */
+let activeBrowser = null;
+
+/**
+ * Close whatever browser is open. Safe to call when there is none.
+ *
+ * @returns {Promise<boolean>} true if something was actually closed.
+ */
+export async function closeActiveBrowser() {
+  if (!activeBrowser) return false;
+  const { browser, context } = activeBrowser;
+  activeBrowser = null;
+  // A persistent context owns its own browser: closing it twice throws.
+  await context.close().catch(() => {});
+  if (browser) await browser.close().catch(() => {});
+  return true;
+}
+
 const CONTEXT_OPTIONS = {
   viewport: { width: 1360, height: 900 },
   locale: "en-US",
@@ -385,10 +409,12 @@ async function openBrowser(headless) {
       headless,
       ...CONTEXT_OPTIONS,
     });
-    return { browser: null, context };
+    activeBrowser = { browser: null, context };
+    return activeBrowser;
   }
   const browser = await chromium.launch({ headless });
-  return { browser, context: await browser.newContext(CONTEXT_OPTIONS) };
+  activeBrowser = { browser, context: await browser.newContext(CONTEXT_OPTIONS) };
+  return activeBrowser;
 }
 
 /**
@@ -414,7 +440,7 @@ export async function scrape(
   const url = `https://www.google.com/maps/search/${encodeURIComponent(query)}`;
   const collected = [];
 
-  const { browser, context } = await openBrowser(headless);
+  const { context } = await openBrowser(headless);
   const page = context.pages()[0] ?? (await context.newPage());
 
   try {
@@ -528,9 +554,7 @@ export async function scrape(
       onStatus(`Google Maps pass finished - ${collected.length} businesses kept.`);
     }
   } finally {
-    // A persistent context owns its own browser: closing it twice throws.
-    await context.close().catch(() => {});
-    if (browser) await browser.close().catch(() => {});
+    await closeActiveBrowser();
   }
 
   return collected;

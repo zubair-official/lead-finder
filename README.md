@@ -155,6 +155,11 @@ Every run is written to `runs/<jobId>.jsonl` as it happens, with a small
 them newest first; click one to load it back into the table. Runs made before
 this feature existed still list, just without a label.
 
+Stopping the server with Ctrl-C (or `docker stop`) during a run asks the scrape
+to stop, closes Chromium, and records the run as **interrupted** — the rows
+already found are kept. Press Ctrl-C a second time to leave immediately, which
+skips that cleanup.
+
 ## Configuration
 
 Copy `.env.example` to `.env` and edit — it's loaded automatically (Node's

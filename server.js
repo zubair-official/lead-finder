@@ -16,7 +16,8 @@ import { CATEGORIES } from "./src/categories.js";
 import { config, configWarnings, describeConfig } from "./src/config.js";
 import { SiteFetcher } from "./src/emails.js";
 import { log } from "./src/logger.js";
-import { BlockedError, ConsentRequired, identityKey, scrape } from "./src/maps.js";
+import { BlockedError, ConsentRequired, closeActiveBrowser, identityKey, scrape } from "./src/maps.js";
+import { createShutdown } from "./src/shutdown.js";
 import { createJob, getJob, RUNS_DIR } from "./src/store.js";
 import { hasMailExchanger } from "./src/verify.js";
 
@@ -32,6 +33,7 @@ app.use(express.static(path.join(HERE, "public")));
 // mean two Chromium instances hammering Google in parallel, so a second search is
 // refused rather than queued.
 let searchInFlight = false;
+let activeJob = null;
 
 /** The whole pipeline for one search: Maps pass over each area, then emails. */
 async function runSearch(job) {
@@ -184,8 +186,10 @@ app.post("/search", (request, response) => {
 
   // Deliberately not awaited: the request returns immediately and the browser
   // follows progress through /status/:jobId.
+  activeJob = job;
   runSearch(job).finally(() => {
     searchInFlight = false;
+    activeJob = null;
   });
 
   return response.json({ job_id: job.id });
@@ -289,10 +293,14 @@ server.on("error", (error) => {
   throw error;
 });
 
+const shutdown = createShutdown({
+  closeServer: () => new Promise((resolve) => server.close(() => resolve())),
+  getActiveJob: () => activeJob,
+  closeBrowser: closeActiveBrowser,
+  exit: (code) => process.exit(code),
+  log,
+});
+
 for (const signal of ["SIGINT", "SIGTERM"]) {
-  process.on(signal, () => {
-    log.info(`${signal} received, shutting down.`);
-    server.close(() => process.exit(0));
-    setTimeout(() => process.exit(0), 5000).unref();
-  });
+  process.on(signal, () => { shutdown(signal); });
 }
