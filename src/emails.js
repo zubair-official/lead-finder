@@ -9,6 +9,8 @@ import * as cheerio from "cheerio";
 import robotsParser from "robots-parser";
 
 import { config } from "./config.js";
+import { log } from "./logger.js";
+import { assertPublicUrl, BlockedAddressError, MAX_REDIRECTS, readCapped } from "./net.js";
 import { analyseSite, isSocialOnly } from "./signals.js";
 
 export const USER_AGENT =
@@ -100,17 +102,41 @@ export function baseDomain(url) {
 
 /** Fetches business websites politely: robots.txt respected, one page at a time. */
 export class SiteFetcher {
-  constructor({ timeout = config.emailTimeoutMs } = {}) {
+  constructor({ timeout = config.emailTimeoutMs, resolve } = {}) {
     this.timeout = timeout;
     this.robotsCache = new Map();
+    // Injectable for tests; undefined means node's own DNS lookup.
+    this.resolve = resolve;
   }
 
+  /**
+   * Fetch a URL, checking every hop against the private address space.
+   *
+   * Redirects are followed by hand rather than by the runtime: with
+   * `redirect: "follow"` only the first URL could be vetted, and a public
+   * hostname that redirects to 127.0.0.1 is the usual way past that.
+   */
   async #get(url) {
-    return fetch(url, {
-      headers: { "User-Agent": USER_AGENT },
-      redirect: "follow",
-      signal: AbortSignal.timeout(this.timeout),
-    });
+    let current = url;
+
+    for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
+      await assertPublicUrl(current, { resolve: this.resolve });
+
+      const response = await fetch(current, {
+        headers: { "User-Agent": USER_AGENT },
+        redirect: "manual",
+        signal: AbortSignal.timeout(this.timeout),
+      });
+
+      const location = response.status >= 300 && response.status < 400
+        ? response.headers.get("location")
+        : null;
+      if (!location) return response;
+
+      current = new URL(location, current).href;
+    }
+
+    throw new BlockedAddressError(`Too many redirects starting at ${url}`);
   }
 
   async #robotsFor(url) {
@@ -120,8 +146,13 @@ export class SiteFetcher {
       try {
         const response = await this.#get(`${origin}/robots.txt`);
         // No usable robots.txt: default to allowed, same as any crawler would.
-        if (response.ok) parser = robotsParser(`${origin}/robots.txt`, await response.text());
-      } catch {
+        if (response.ok) {
+          const { text } = await readCapped(response, config.maxPageBytes);
+          parser = robotsParser(`${origin}/robots.txt`, text);
+        }
+      } catch (error) {
+        // A blocked address must not be treated as "no robots.txt, carry on".
+        if (error instanceof BlockedAddressError) throw error;
         parser = null;
       }
       this.robotsCache.set(origin, parser);
@@ -169,13 +200,26 @@ export class SiteFetcher {
       } catch {
         continue;
       }
-      if (!(await this.mayFetch(url))) continue;
+      try {
+        if (!(await this.mayFetch(url))) continue;
+      } catch (error) {
+        if (error instanceof BlockedAddressError) {
+          log.warn("refused to fetch an internal address", { website, reason: error.message });
+          return { email: null, source: null, analysis: null, blocked: true };
+        }
+        throw error;
+      }
 
       const startedAt = Date.now();
       let response;
       try {
         response = await this.#get(url);
-      } catch {
+      } catch (error) {
+        if (error instanceof BlockedAddressError) {
+          // Not a lead and not a failure of theirs: stop touching this host.
+          log.warn("refused to fetch an internal address", { website, reason: error.message });
+          return { email: null, source: null, analysis: null, blocked: true };
+        }
         // Timeout, DNS failure, bad certificate. A homepage that will not load
         // is itself the strongest signal there is.
         if (contactPath === "/") analysis = analyseSite({ url: target, reachable: false });
@@ -190,7 +234,8 @@ export class SiteFetcher {
         continue;
       }
 
-      const html = await response.text();
+      const { text: html, truncated } = await readCapped(response, config.maxPageBytes);
+      if (truncated) log.debug("page body hit the size cap", { url });
       if (contactPath === "/" || !analysis) {
         analysis = analyseSite({
           url: target,
