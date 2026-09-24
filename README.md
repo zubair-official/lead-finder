@@ -90,6 +90,11 @@ Gulberg Lahore, DHA Lahore, Model Town Lahore, Johar Town Lahore
 Narrowing the category works the same way — `bbq`, `fast food` and `cafe` each
 get their own ceiling.
 
+Each business's site gets one time budget (`SITE_BUDGET_MS`, 25s) covering
+every contact page tried, and a host whose homepage will not load is dropped
+immediately rather than being asked for five more pages that live on the same
+dead server.
+
 Budget the time: each listing opens a detail panel and each website gets
 visited, so roughly 6-10 seconds per business. Forty results is about 5 minutes;
 a four-area sweep at 40 each is closer to half an hour.
@@ -180,6 +185,7 @@ the file. Everything is optional.
 | `LOOKUP_EMAILS` | `true` | Turn off for a Maps-only run |
 | `EMAIL_TIMEOUT_MS` | `10000` | Per-request timeout when fetching a business site |
 | `MAX_PAGE_BYTES` | `2000000` | Ceiling on a fetched page body |
+| `SITE_BUDGET_MS` | `25000` | Total time for one business's site, across all contact pages |
 | `RESPECT_ROBOTS` | `true` | Leave it on |
 | `RUNS_DIR` | `runs` | Where the incremental JSONL files go |
 
