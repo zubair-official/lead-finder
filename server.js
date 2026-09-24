@@ -7,7 +7,7 @@
  */
 
 import express from "express";
-import { readdir, readFile } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -18,6 +18,7 @@ import { SiteFetcher } from "./src/emails.js";
 import { log } from "./src/logger.js";
 import { BlockedError, ConsentRequired, closeActiveBrowser, identityKey, scrape } from "./src/maps.js";
 import { createShutdown } from "./src/shutdown.js";
+import { createRunsReader } from "./src/runs.js";
 import { createJob, getJob, RUNS_DIR } from "./src/store.js";
 import { hasMailExchanger } from "./src/verify.js";
 
@@ -195,34 +196,12 @@ app.post("/search", (request, response) => {
   return response.json({ job_id: job.id });
 });
 
-/** Past runs, newest first, read straight off the runs/ directory. */
-app.get("/api/runs", async (_request, response) => {
+const runsReader = createRunsReader({ runsDir: RUNS_DIR, readdir, readFile, stat });
+
+/** Past runs, newest first. Paginated; see src/runs.js for why that matters. */
+app.get("/api/runs", async (request, response) => {
   try {
-    const entries = await readdir(RUNS_DIR).catch(() => []);
-    const ids = entries.filter((name) => name.endsWith(".jsonl")).map((name) => name.replace(/\.jsonl$/, ""));
-
-    const runs = await Promise.all(ids.map(async (id) => {
-      const rows = await countRows(path.join(RUNS_DIR, `${id}.jsonl`));
-      let meta = {};
-      try {
-        meta = JSON.parse(await readFile(path.join(RUNS_DIR, `${id}.meta.json`), "utf8"));
-      } catch {
-        // Runs from before metadata existed still list, just without labels.
-      }
-      return {
-        id,
-        city: meta.city ?? "",
-        category: meta.category ?? "",
-        createdAt: meta.createdAt ?? null,
-        state: meta.state ?? "unknown",
-        // The file is the source of truth for the count; meta can be stale.
-        count: rows.total,
-        withEmail: rows.withEmail,
-      };
-    }));
-
-    runs.sort((a, b) => String(b.createdAt ?? "").localeCompare(String(a.createdAt ?? "")) || b.count - a.count);
-    response.json({ runs });
+    response.json(await runsReader.list(request.query));
   } catch (error) {
     log.error("could not list runs", { error: error.message });
     response.status(500).json({ error: "Could not read the runs directory." });
@@ -243,19 +222,6 @@ app.get("/api/runs/:id", async (request, response) => {
   }
 });
 
-async function countRows(file) {
-  try {
-    const body = await readFile(file, "utf8");
-    const lines = body.split("\n").filter(Boolean);
-    let withEmail = 0;
-    for (const line of lines) {
-      try { if (JSON.parse(line).email) withEmail += 1; } catch { /* skip bad line */ }
-    }
-    return { total: lines.length, withEmail };
-  } catch {
-    return { total: 0, withEmail: 0 };
-  }
-}
 
 app.get("/status/:jobId", (request, response) => {
   const job = getJob(request.params.jobId);

@@ -160,6 +160,12 @@ Every run is written to `runs/<jobId>.jsonl` as it happens, with a small
 them newest first; click one to load it back into the table. Runs made before
 this feature existed still list, just without a label.
 
+The listing is paginated and leans on the sidecar: a run's counts are read from
+its `.meta.json` whenever that file is at least as new as its `.jsonl`, so a
+completed run costs a `stat` rather than a full read. Only rows on the page
+being returned are ever counted, and results are cached against file mtime and
+size.
+
 Stopping the server with Ctrl-C (or `docker stop`) during a run asks the scrape
 to stop, closes Chromium, and records the run as **interrupted** — the rows
 already found are kept. Press Ctrl-C a second time to leave immediately, which
@@ -300,6 +306,7 @@ search.
 | `src/config.js` | Environment parsing, validation and clamping |
 | `src/logger.js` | Small levelled logger |
 | `src/areas.js` | Splits "A, B, C" into separate searches |
+| `src/runs.js` | Lists past runs without re-reading them all |
 | `src/maps.js` | Playwright pass over Google Maps |
 | `src/emails.js` | Fetches each business's own site looking for an email |
 | `src/store.js` | Job state, and the incremental write to `runs/` |
@@ -310,7 +317,7 @@ search.
 ```
 GET  /                -> the UI
 GET  /api/config      -> categories, result cap, headless flag
-GET  /api/runs        -> past runs, newest first
+GET  /api/runs        -> past runs, newest first; ?limit= (max 200) &offset=
 GET  /api/runs/:id    -> the rows of one saved run
 GET  /healthz         -> { status, uptimeSeconds, searchInFlight, headless }
 POST /search          -> { job_id }; starts a run, returns immediately, 409 if one is active
