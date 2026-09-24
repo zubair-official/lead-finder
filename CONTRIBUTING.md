@@ -37,7 +37,9 @@ Contributions must keep these safeguards intact:
 - a finite result cap;
 - immediate stop when Google displays CAPTCHA, unusual-traffic, consent, or blocking pages;
 - no CAPTCHA solving, stealth plugins, proxy rotation, fingerprint spoofing, access-control bypasses, or attempts to evade rate limits;
-- website inspection must respect `robots.txt` by default.
+- website inspection must respect `robots.txt` by default;
+- outbound requests must refuse private, loopback, link-local, and
+  cloud-metadata addresses, on every redirect hop.
 
 Changes that remove or work around these boundaries will not be accepted.
 

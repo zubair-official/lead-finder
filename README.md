@@ -134,6 +134,16 @@ prospect. Sort by the Score column to put the best leads on top.
 An empty Signals cell reads **clean** when the site was checked and nothing was
 wrong, and **—** when it hasn't been graded yet. Those are different answers.
 
+### Where it will not go
+
+Website addresses come from Google Maps listings, which is third-party data.
+Before any request the target is resolved and checked, and **private,
+loopback, link-local and cloud-metadata addresses are refused** — including
+when a public hostname redirects to one, since redirects are followed by hand
+and every hop is re-checked. Page bodies are read up to `MAX_PAGE_BYTES`
+rather than buffered whole. This matters most when self-hosting: a server that
+will fetch any URL it is handed is a way into whatever else is on that network.
+
 Found emails also get a DNS **MX lookup**, so a ✓ next to an address means the
 domain can actually receive mail. That is not proof the mailbox exists, but it
 catches scraped addresses on domains that never had mail configured.
@@ -164,6 +174,7 @@ the file. Everything is optional.
 | `PAUSE_MIN_MS` / `PAUSE_MAX_MS` | `2000` / `5000` | Delay between actions. **Floored at 1000ms** |
 | `LOOKUP_EMAILS` | `true` | Turn off for a Maps-only run |
 | `EMAIL_TIMEOUT_MS` | `10000` | Per-request timeout when fetching a business site |
+| `MAX_PAGE_BYTES` | `2000000` | Ceiling on a fetched page body |
 | `RESPECT_ROBOTS` | `true` | Leave it on |
 | `RUNS_DIR` | `runs` | Where the incremental JSONL files go |
 
