@@ -8,7 +8,7 @@
   "scripts": {
     "start": "node server.js",
     "scrape": "node src/maps.js",
-    "test": "node --test \"test/**/*.test.js\"",
+    "test": "node --test",
     "postinstall": "node scripts/postinstall.mjs",
     "build:demo": "node scripts/build-demo.mjs",
     "preview:demo": "node scripts/serve-demo.mjs"
